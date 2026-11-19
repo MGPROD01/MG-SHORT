@@ -1,0 +1,115 @@
+MG SHORTS STUDIO
+================
+
+Deux usages :
+  - VIDEO LONGUE (episode, interview, plus de 2 min 30) : l'outil trouve les
+    meilleurs passages et fabrique un short vertical habille pour chacun.
+  - SHORT DEJA MONTE (vertical, switch cameras et derush faits dans Premiere) :
+    l'outil l'habille directement, comme avant.
+
+INSTALLATION (une seule fois)
+  1. Double-clique sur install.bat. Il installe ce qui manque : Python, ffmpeg,
+     Whisper (version GPU si tu as une carte NVIDIA), la detection des visages,
+     copie le modele Whisper et les musiques ES_*.wav depuis le Bureau, et cree
+     un raccourci sur le Bureau. Il demande aussi la cle API Claude (facultatif).
+  2. Double-clique sur le raccourci "MG Shorts Studio" : l'interface s'ouvre
+     dans ton navigateur (http://localhost:8765). Garde la fenetre noire ouverte
+     pendant que tu travailles.
+
+VIDEO LONGUE -> SHORTS
+  A l'ouverture, l'outil demande le mode (pour changer : recharger la page, F5) :
+  - Moments auto : Claude propose les meilleurs passages (1 min a 2 min 30).
+  - Manuel : rien n'est propose, tu places toi-meme chaque short avec In / Out
+    sur la timeline puis "Nouveau short In -> Out".
+  Changer le debut ou la fin d'un short deja cree : clique le short (dans la
+  liste ou sur la timeline), In et Out se placent sur son debut et sa fin ;
+  deplace l'un des deux (touches I / O) puis "Recaler le short sur In -> Out".
+  Depuis un short, le bouton "Debut / fin" y mene directement. Le short se
+  refabrique en gardant tes corrections de texte, jaune, zooms, bruitages et
+  habillage.
+  1. Exporte l'episode depuis Premiere (16:9, multicam deja fait) et glisse-le
+     dans "Nouveau projet". On peut en glisser plusieurs d'un coup.
+  2. Rien d'autre a faire : transcription, choix des meilleurs passages par
+     Claude, decoupe, recadrage vertical sur la personne qui parle, sous-titres,
+     accroche, mots en jaune, zooms, musique, puis V1 de chaque short.
+     Recadrage : sur un plan large avec plusieurs personnes, le cadre va sur
+     celle dont la bouche bouge quand on parle ; si tout le monde tient dans le
+     cadre vertical, il reste sur le groupe. Les bascules se font a l'image pres.
+  3. La liste des passages s'affiche avec une note et la raison du choix.
+     "Telecharger V1" si c'est bon, "Ouvrir" pour retoucher puis generer V2.
+  4. Un passage manque ? "Ajouter un passage" (debut / fin), ou
+     "Chercher d'autres moments".
+  Sans cle API : clique "Copier la demande", colle-la dans Claude, recolle sa
+  reponse dans l'outil et valide. La suite est automatique.
+
+TIMELINE (en bas de l'ecran)
+  Pistes : Video (plans), Texte (sous-titres), Effets (accroche, zooms,
+  bruitages), Voix, Musique. Clic ou glisser = deplacer la lecture.
+  Comme Premiere : molette = faire defiler, Alt + molette = zoomer / dezoomer
+  autour de la souris (jusqu a l image pres). Maj + molette = defiler vite.
+  Raccourcis : Espace lecture/pause, I point d'entree, O point de sortie,
+  Suppr retirer le passage entre In et Out, X effacer In/Out,
+  fleches gauche/droite image par image (Maj = 1 seconde).
+  Sur un short, la timeline montre le montage final : les passages retires
+  sont refermes, avec un trait rouge (bouton "Remettre") a chaque raccord.
+  Outils (comme Premiere) :
+    V  Selection : clic sur un clip ou un sous-titre pour le selectionner.
+       Glisser un sous-titre = le recaler ; tirer ses bords = changer son
+       debut ou sa fin. Tirer le bord d'un clip video = le raccourcir.
+    C  Couper : un clic tranche le clip video a cet endroit (sur la piste
+       Texte, coupe le sous-titre en deux). Ctrl+K = couper a la tete de lecture.
+    Suppr  retire le clip selectionne et raccorde (ou supprime le
+       sous-titre selectionne, le son reste ; ou retire In -> Out).
+    Ctrl+Z  annuler.
+  Sous-titres (onglet Texte) : "Recaler sur la voix" recalcule le minutage de
+  chaque mot d'apres le son (fait tout seul a chaque transcription) ;
+  "Tout decaler" de +/- 1 image ou 0,1 s.
+  Sur une video longue : In / Out puis "Creer un short In -> Out".
+
+SHORT DEJA MONTE
+  - Glisse ta video. La transcription et le reperage des changements de camera
+    demarrent tout seuls.
+  - Texte : clique un mot pour corriger son orthographe, le passer en jaune,
+    ajouter un zoom ou un bruitage de ton SoundsPack.
+  - Habillage : accroche (*mot* = jaune, / = retour a la ligne), musique,
+    volume, taille et hauteur des sous-titres, zooms.
+  - Images fantomes (Habillage, coche par defaut) : retire l'image en trop
+    aux coupes (melange de deux plans, ou image isolee d'un autre plan) et la
+    remplace par l'image d'avant. Duree et son inchanges.
+  - Blancs (Habillage, coche par defaut) : les pauses plus longues que le
+    reglage (0,5 s) et les "euh" sont coupes tout seuls. Ils apparaissent
+    hachures en jaune sur la timeline. Decocher pour tout garder.
+  - Sous-titres : 4 styles (karaoke, mot a mot, un seul mot a la fois,
+    simple), la couleur des mots en avant. Par defaut : fixes (case
+    "Animation d'apparition" decochee) et sans ponctuation (case "Retirer la
+    ponctuation").
+  - Recadrer : clique-glisse l'image dans l'apercu. Ca recadre le clip sous
+    la tete de lecture (un clip = un plan / une prise de parole, voir la piste
+    Video). "Cadrage auto" revient au suivi automatique de qui parle.
+    Les shorts decoupes avant cette version : "Relancer la decoupe" (onglet
+    Versions) pour pouvoir les recadrer.
+  - Generer V1, V2, V3... : chaque rendu devient une version.
+  - Versions > Texte de publication : legende, hashtags et 3 accroches
+    proposes par Claude. "Utiliser" met l'accroche sur le short. Avec la cle
+    API c'est automatique sur chaque short tire d'une video longue ; sans cle,
+    "Copier la demande" puis coller la reponse de Claude.
+
+REGLAGES AVANCES (config.json, a ouvrir avec le Bloc-notes)
+  anthropic_api_key  cle API Claude (console.anthropic.com) ; vide = copier-coller
+  claude_model       modele utilise (par defaut claude-sonnet-5-5)
+  episode_context    une phrase sur l'emission pour guider Claude
+                     (ex. "Emission culinaire humoristique de Pierre Croce")
+  clip_min, clip_max duree des shorts en secondes (60 et 150 : de 1 min a 2 min 30)
+  clip_count         nombre maximum de shorts par video longue (8)
+  encoder            "auto" (carte graphique Nvidia / Intel / AMD si possible,
+                     sinon processeur) ou "cpu" pour forcer le processeur
+  episode_min_sec    au-dela de cette duree, une video est traitee comme longue (150)
+  auto_render        true = la V1 de chaque short se genere toute seule
+  sfx_dir            dossier des bruitages (par defaut : Bureau\SoundsPack - MG 2026)
+  projects_dir       ou ranger les projets (ex. "G:/SHORTS" ; par defaut : projets)
+  whisper_prompt     prenoms a bien orthographier
+  word_fixes         corrections automatiques apres Whisper (ex. "Alexis" -> "Alexy")
+  port               port de l'interface (8765)
+
+Ajouter une musique : depose un .wav ou .mp3 dans le dossier "musiques".
+Police des sous-titres : Montserrat Black (licence OFL, dossier fonts).

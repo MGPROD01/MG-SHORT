@@ -1,0 +1,12 @@
+# donnees locales du PC : jamais sur GitHub
+config.json
+presets.json
+projets/
+bin/
+musiques/
+models/*.bin
+__pycache__/
+*.pyc
+# fichiers tiers gardes en local (droits de diffusion)
+sons/
+safezones/
