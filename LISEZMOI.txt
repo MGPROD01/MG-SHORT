@@ -94,6 +94,18 @@ SHORT DEJA MONTE
     API c'est automatique sur chaque short tire d'une video longue ; sans cle,
     "Copier la demande" puis coller la reponse de Claude.
 
+LIEN D'EQUIPE (utiliser l'outil depuis n'importe quel ordinateur)
+  Sur le PC qui fait tourner l'outil : bouton "Lien d'equipe" en bas a gauche.
+  1. Choisis un mot de passe d'equipe (6 caracteres minimum).
+  2. "Activer le lien" : une adresse https://....trycloudflare.com s'affiche.
+     "Copier" et envoie-la a l'equipe avec le mot de passe.
+  Les autres ouvrent le lien dans leur navigateur, entrent le mot de passe,
+  et travaillent comme sur ce PC (les videos s'envoient par morceaux).
+  Ce PC doit rester allume avec l'outil lance : c'est lui qui fait le travail.
+  Le lien se relance tout seul au demarrage, mais son adresse change a chaque
+  redemarrage : renvoie le nouveau lien. (Adresse fixe type shorts.mgprod.fr :
+  possible avec un compte Cloudflare, voir avec Claude.)
+
 REGLAGES AVANCES (config.json, a ouvrir avec le Bloc-notes)
   anthropic_api_key  cle API Claude (console.anthropic.com) ; vide = copier-coller
   claude_model       modele utilise (par defaut claude-sonnet-5-5)

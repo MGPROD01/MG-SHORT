@@ -7,7 +7,7 @@ versions V1/V2/V3... Aucune dependance Python : uniquement la bibliotheque stand
 
 Lancer : python server.py   puis ouvrir http://localhost:8765
 """
-import array, math, json, os, re, shutil, subprocess, sys, threading, time, queue, unicodedata, uuid, mimetypes, urllib.parse, urllib.request, urllib.error
+import array, hashlib, hmac, math, json, secrets, os, re, shutil, subprocess, sys, threading, time, queue, unicodedata, uuid, mimetypes, urllib.parse, urllib.request, urllib.error
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 APP = os.path.dirname(os.path.abspath(__file__))
@@ -53,12 +53,118 @@ def load_cfg():
 
 
 CFG = load_cfg()
+
+
+def save_cfg(**kv):
+    """Enregistre quelques cles dans config.json (sans toucher au reste) et dans CFG."""
+    path = os.path.join(APP, "config.json")
+    try:
+        raw = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else {}
+    except ValueError:
+        raw = {}
+    raw.update(kv); CFG.update(kv)
+    json.dump(raw, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------- lien d'equipe (Cloudflare Tunnel)
+# L'outil tourne sur ce PC ; un tunnel Cloudflare lui donne une adresse https accessible de partout.
+# Tout acces par le lien demande le mot de passe d'equipe ; sur ce PC (localhost), pas de mot de passe.
+TUNNEL = {"proc": None, "url": None, "error": None, "starting": False}
+
+
+def auth_token():
+    if not CFG.get("auth_secret"): save_cfg(auth_secret=secrets.token_hex(24))
+    return hmac.new(CFG["auth_secret"].encode(), (CFG.get("team_password") or "").encode(), hashlib.sha256).hexdigest()
+
+
+def cloudflared_path():
+    exe = os.path.join(APP, "bin", "cloudflared.exe" if WIN else "cloudflared")
+    if CFG.get("cloudflared") and os.path.exists(CFG["cloudflared"]): return CFG["cloudflared"]
+    if os.path.exists(exe): return exe
+    os.makedirs(os.path.dirname(exe), exist_ok=True)
+    name = "cloudflared-windows-amd64.exe" if WIN else "cloudflared-linux-amd64"
+    urllib.request.urlretrieve(f"https://github.com/cloudflare/cloudflared/releases/latest/download/{name}", exe + ".tmp")
+    os.replace(exe + ".tmp", exe)
+    if not WIN: os.chmod(exe, 0o755)
+    return exe
+
+
+TUNNEL_PID = os.path.join(APP, "bin", "cloudflared.pid")
+
+
+def kill_old_tunnel():
+    """Fenetre fermee brutalement : l'ancien cloudflared peut tourner encore. On l'arrete avant d'en relancer un."""
+    try:
+        pid = int(open(TUNNEL_PID).read().strip())
+    except (OSError, ValueError):
+        return
+    try:
+        if WIN: subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, creationflags=NOWIN)
+        else: os.kill(pid, 15)
+    except OSError:
+        pass
+    try: os.remove(TUNNEL_PID)
+    except OSError: pass
+
+
+def start_tunnel():
+    if TUNNEL["proc"] and TUNNEL["proc"].poll() is None: return
+    kill_old_tunnel()
+    TUNNEL.update(url=None, error=None, starting=True)
+    def run_():
+        try:
+            exe = cloudflared_path()
+            port = int(CFG.get("port", 8765))
+            if CFG.get("tunnel_token"):  # tunnel nomme (adresse fixe, ex. shorts.mgprod.fr)
+                cmd = [exe, "tunnel", "--no-autoupdate", "run", "--token", CFG["tunnel_token"]]
+                TUNNEL["url"] = CFG.get("tunnel_url")
+            else:  # tunnel rapide : adresse https://...trycloudflare.com, differente a chaque demarrage
+                cmd = [exe, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"]
+            pr = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                  encoding="utf-8", errors="replace", creationflags=NOWIN)
+            TUNNEL["proc"] = pr; tail = []
+            try: open(TUNNEL_PID, "w").write(str(pr.pid))
+            except OSError: pass
+            for line in pr.stderr:
+                tail = (tail + [line.strip()])[-8:]
+                m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+                if m and not CFG.get("tunnel_token"): TUNNEL["url"] = m.group(0); TUNNEL["starting"] = False
+                if "Registered tunnel connection" in line: TUNNEL["starting"] = False
+            TUNNEL.update(url=None, starting=False, error="Le lien s'est arrêté : " + (tail[-1] if tail else "?"))
+        except Exception as e:  # noqa
+            TUNNEL.update(url=None, starting=False, error=f"Impossible de créer le lien : {e}")
+    threading.Thread(target=run_, daemon=True).start()
+
+
+def stop_tunnel():
+    pr = TUNNEL.get("proc")
+    if pr and pr.poll() is None:
+        pr.terminate()
+        try: pr.wait(timeout=5)
+        except Exception: pass
+    kill_old_tunnel()
+    TUNNEL.update(proc=None, url=None, starting=False, error=None)
+
+
+LOGIN_HTML = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MG Shorts Studio</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#09090B;color:#F4F4F5;font:15px/1.4 system-ui,sans-serif}
+form{width:300px;display:grid;gap:12px;padding:28px;border:1px solid #27272A;border-radius:16px;background:#111114}
+h1{margin:0 0 4px;font-size:18px}.m{color:#A1A1AA;font-size:13px;margin:0}input,button{font:inherit;padding:11px 12px;border-radius:10px;border:1px solid #3F3F46;background:#18181B;color:#fff}
+button{background:#FF6B1A;border-color:#FF6B1A;color:#0B0B0D;font-weight:700;cursor:pointer}.e{color:#F87171;font-size:13px;margin:0}</style></head>
+<body><form method="post" action="/login"><h1>MG Shorts Studio</h1><p class="m">Mot de passe de l'équipe</p>
+<input type="password" name="password" autofocus autocomplete="current-password" aria-label="Mot de passe">%ERR%<button>Entrer</button></form></body></html>"""
+
+
 try:
     VERSION = open(os.path.join(APP, "VERSION"), encoding="utf-8").read().strip()
 except OSError:
     VERSION = "?"
 PROJ = CFG["projects_dir"]
 os.makedirs(PROJ, exist_ok=True)
+UPLOADS = os.path.join(PROJ, "_envois")  # videos en cours d'envoi par morceaux
+os.makedirs(UPLOADS, exist_ok=True)
+for _u in os.listdir(UPLOADS):  # envois abandonnes depuis plus d'un jour
+    if time.time() - os.path.getmtime(os.path.join(UPLOADS, _u)) > 86400: shutil.rmtree(os.path.join(UPLOADS, _u), ignore_errors=True)
 W, H = 1080, 1920
 
 DEFAULT_SETTINGS = {
@@ -1701,6 +1807,34 @@ class H_(BaseHTTPRequestHandler):
             except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
                 pass
 
+    def remote(self):
+        """Requete venue par le lien d'equipe (Cloudflare) ou d'un autre poste, et pas de ce PC."""
+        return bool(self.headers.get("Cf-Connecting-Ip") or self.headers.get("Cf-Ray")) or self.client_address[0] not in ("127.0.0.1", "::1")
+
+    def authed(self):
+        if not self.remote(): return True
+        if not CFG.get("team_password"): return False
+        ck = {}
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            if "=" in part: k, v = part.strip().split("=", 1); ck[k] = v
+        return hmac.compare_digest(ck.get("mg_auth", ""), auth_token())
+
+    def gate(self, parts):
+        """True si la requete peut passer ; sinon la page de connexion (ou 401 pour l'API) est deja envoyee."""
+        if self.authed() or parts[:1] == ["login"]: return True
+        if parts[:1] == ["api"] or self.command != "GET":
+            self.send_json({"error": "Connexion nécessaire : recharge la page et entre le mot de passe."}, 401)
+        else:
+            self.send_html(LOGIN_HTML.replace("%ERR%", ""))
+        return False
+
+    def send_html(self, html, code=200, extra=None):
+        b = html.encode()
+        self.send_response(code); self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(b))); self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or []): self.send_header(k, v)
+        self.end_headers(); self.wfile.write(b)
+
     def route(self):
         u = urllib.parse.urlparse(self.path); parts = [urllib.parse.unquote(x) for x in u.path.strip("/").split("/") if x]
         return parts, urllib.parse.parse_qs(u.query)
@@ -1709,6 +1843,12 @@ class H_(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             parts, q = self.route()
+            if not self.gate(parts): return
+            if parts[:1] == ["login"]: return self.send_html(LOGIN_HTML.replace("%ERR%", ""))
+            if parts[:2] == ["api", "share"]:
+                return self.send_json({"local": not self.remote(), "on": bool(TUNNEL["proc"] and TUNNEL["proc"].poll() is None),
+                                       "url": TUNNEL["url"], "starting": TUNNEL["starting"], "error": TUNNEL["error"],
+                                       "has_password": bool(CFG.get("team_password")), "fixed": bool(CFG.get("tunnel_token"))})
             if not parts: return self.send_file(os.path.join(APP, "web", "index.html"))
             if parts[0] == "web": return self.send_file(os.path.join(APP, "web", os.path.basename(parts[-1])))
             if parts[0] == "fonts": return self.send_file(os.path.join(CFG["fonts_dir"], os.path.basename(parts[-1])))
@@ -1792,6 +1932,7 @@ class H_(BaseHTTPRequestHandler):
     def do_PUT(self):
         try:
             parts, q = self.route()
+            if not self.gate(parts): return
             if parts[:2] != ["api", "upload"]: return self.send_json({"error": "route inconnue"}, 404)
             fname = os.path.basename(q.get("filename", ["video.mp4"])[0])
             name = q.get("name", [fname.rsplit(".", 1)[0]])[0].strip() or "Projet"
@@ -1799,14 +1940,20 @@ class H_(BaseHTTPRequestHandler):
             while os.path.exists(os.path.join(PROJ, pid)): pid = f"{base}_{i}"; i += 1
             d = os.path.join(PROJ, pid); os.makedirs(d)
             ext = os.path.splitext(fname)[1].lower() or ".mp4"
-            left = int(self.headers.get("Content-Length") or 0)
-            with open(os.path.join(d, "source" + ext), "wb") as f:
-                while left > 0:
-                    b = self.rfile.read(min(4 << 20, left))
-                    if not b: break
-                    f.write(b); left -= len(b)
-            if left > 0:
-                shutil.rmtree(d, ignore_errors=True); return self.send_json({"error": "upload interrompu"}, 400)
+            uid = re.sub(r"[^a-z0-9]", "", q.get("uid", [""])[0])
+            if uid:  # fichier envoye en morceaux (le lien Cloudflare refuse les envois de plus de 100 Mo d'un coup)
+                part = os.path.join(UPLOADS, uid, "part")
+                if not os.path.exists(part): shutil.rmtree(d, ignore_errors=True); return self.send_json({"error": "envoi introuvable"}, 400)
+                os.replace(part, os.path.join(d, "source" + ext)); shutil.rmtree(os.path.join(UPLOADS, uid), ignore_errors=True)
+            else:
+                left = int(self.headers.get("Content-Length") or 0)
+                with open(os.path.join(d, "source" + ext), "wb") as f:
+                    while left > 0:
+                        b = self.rfile.read(min(4 << 20, left))
+                        if not b: break
+                        f.write(b); left -= len(b)
+                if left > 0:
+                    shutil.rmtree(d, ignore_errors=True); return self.send_json({"error": "upload interrompu"}, 400)
             info = probe(os.path.join(d, "source" + ext))
             mode = q.get("mode", ["auto"])[0]
             long_ = mode == "episode" or (mode == "auto" and info["duration"] >= float(CFG.get("episode_min_sec", 150)))
@@ -1826,6 +1973,46 @@ class H_(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ POST
     def do_POST(self):
         try:
+            parts0 = self.route()[0]
+            if parts0[:1] == ["login"]:
+                n = int(self.headers.get("Content-Length") or 0)
+                pw = urllib.parse.parse_qs(self.rfile.read(n).decode("utf-8", "replace")).get("password", [""])[0]
+                if CFG.get("team_password") and hmac.compare_digest(pw.encode(), CFG["team_password"].encode()):
+                    return self.send_html('<meta http-equiv="refresh" content="0;url=/">', extra=[
+                        ("Set-Cookie", f"mg_auth={auth_token()}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" + ("; Secure" if self.remote() else ""))])
+                time.sleep(1.5)  # ralentit les essais au hasard
+                return self.send_html(LOGIN_HTML.replace("%ERR%", '<p class="e">Mot de passe incorrect.</p>'), 401)
+            if not self.gate(parts0): return
+            if parts0[:2] == ["api", "upload_chunk"]:  # un morceau d'une video envoyee en plusieurs fois
+                q = self.route()[1]; uid = re.sub(r"[^a-z0-9]", "", q.get("uid", [""])[0]); i = int(q.get("i", ["0"])[0])
+                if not uid: return self.send_json({"error": "uid manquant"}, 400)
+                d = os.path.join(UPLOADS, uid); os.makedirs(d, exist_ok=True)
+                nf = os.path.join(d, "next"); nxt = int(open(nf).read()) if os.path.exists(nf) else 0
+                left = int(self.headers.get("Content-Length") or 0)
+                if i < nxt:  # deja recu (nouvel essai apres une coupure) : on ignore
+                    while left > 0: left -= len(self.rfile.read(min(4 << 20, left)) or b"x" * left)
+                    return self.send_json({"ok": True, "next": nxt})
+                if i > nxt: return self.send_json({"error": f"morceau {i} recu avant le {nxt}", "next": nxt}, 409)
+                with open(os.path.join(d, "part"), "ab") as f:
+                    while left > 0:
+                        b = self.rfile.read(min(4 << 20, left))
+                        if not b: break
+                        f.write(b); left -= len(b)
+                if left > 0: return self.send_json({"error": "morceau incomplet", "next": nxt}, 400)
+                open(nf, "w").write(str(nxt + 1)); return self.send_json({"ok": True, "next": nxt + 1})
+            if parts0[:2] == ["api", "share"]:  # lien d'equipe : reglable seulement depuis ce PC
+                if self.remote(): return self.send_json({"error": "Le lien d'équipe se règle sur le PC qui fait tourner l'outil."}, 403)
+                body = self.body_json(); act = body.get("action")
+                if body.get("password") is not None:
+                    pw = str(body["password"]).strip()
+                    if len(pw) < 6: return self.send_json({"error": "Mot de passe trop court (6 caractères minimum)."}, 400)
+                    save_cfg(team_password=pw)
+                if act == "on":
+                    if not CFG.get("team_password"): return self.send_json({"error": "Choisis d'abord un mot de passe d'équipe."}, 400)
+                    save_cfg(tunnel_on=True); start_tunnel()
+                elif act == "off":
+                    save_cfg(tunnel_on=False); stop_tunnel()
+                return self.send_json({"ok": True})
             parts, q = self.route(); body = self.body_json()
             if parts[:2] == ["api", "projects"] and len(parts) == 4:
                 pid, act = parts[2], parts[3]; p = load_project(pid)
@@ -1950,6 +2137,14 @@ def main():
     port = int(CFG.get("port", 8765))
     srv = ThreadingHTTPServer(("127.0.0.1", port), H_)
     print(f"MG Shorts Studio : http://localhost:{port}  (Ctrl+C pour arrêter)")
+    if CFG.get("tunnel_on") and CFG.get("team_password"):  # lien d'equipe active : on le relance
+        start_tunnel()
+        def show():
+            for _ in range(60):
+                time.sleep(1)
+                if TUNNEL["url"]: print(f"Lien pour l'équipe : {TUNNEL['url']}"); return
+        threading.Thread(target=show, daemon=True).start()
+    import atexit; atexit.register(stop_tunnel)
     if "--open" in sys.argv:
         import webbrowser; threading.Timer(0.8, lambda: webbrowser.open(f"http://localhost:{port}")).start()
     try:
