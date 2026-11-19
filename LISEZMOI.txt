@@ -79,6 +79,10 @@ SHORT DEJA MONTE
   - Caler le cadrage sur les coupes (Habillage, coche par defaut) : tout
     changement de cadrage a moins de 8 images d'une coupe de camera tombe
     exactement sur la coupe. Plus d'image mal cadree au raccord.
+  - Nettoyage final des raccords (Habillage, coche par defaut) : apres chaque
+    rendu, la video finie est relue et toute image isolee qui ne ressemble ni
+    a celle d'avant ni a celle d'apres (mauvais cadre, image d'un autre plan)
+    est remplacee par sa voisine. Duree et son inchanges.
   - Blancs (Habillage, coche par defaut) : les pauses plus longues que le
     reglage (0,5 s) et les "euh" sont coupes tout seuls. Ils apparaissent
     hachures en jaune sur la timeline. Decocher pour tout garder.

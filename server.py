@@ -177,7 +177,7 @@ DEFAULT_SETTINGS = {
     "music": "", "music_db": -26, "music_offset": 0,
     "sub_size": 108, "sub_y": 0.67, "sub_words": 3, "sub_chars": 14, "sub_case": "upper",
     "punch_amount": 1.3, "punch_len": 1.2, "face_y": 0.30, "deghost": True,
-    "cut_silences": True, "silence_gap": 0.5, "cut_fillers": True, "snap_cuts": True,
+    "cut_silences": True, "silence_gap": 0.5, "cut_fillers": True, "snap_cuts": True, "clean_joins": True,
     "sub_style": "karaoke", "sub_hl": "#FFE100", "sub_nopunct": True, "sub_pop": False,
 }
 
@@ -1044,6 +1044,54 @@ def snap_to_cuts(p):
     return p
 
 
+def find_orphans(path, fps):
+    """Images orphelines dans une video FINIE : une image isolee qui ne ressemble ni a celle d'avant ni a celle
+    d'apres (mauvais cadre au raccord, image fantome, image d'un autre plan). Renvoie [(image, image_de_remplacement)].
+    On n'analyse que le haut de l'image (les sous-titres changent souvent en bas)."""
+    import numpy as np
+    ww, hh = 96, 54
+    pr = subprocess.Popen([CFG["ffmpeg"], "-v", "error", "-i", path, "-an", "-vf",
+                           f"crop=iw:ih*0.6:0:0,scale={ww}:{hh}:flags=area,format=gray", "-fps_mode", "passthrough",
+                           "-f", "rawvideo", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=NOWIN)
+    fr = []
+    while True:
+        buf = pr.stdout.read(ww * hh)
+        if len(buf) < ww * hh: break
+        fr.append(np.frombuffer(buf, np.uint8).astype(np.float32))
+    pr.wait()
+    n = len(fr)
+    find_orphans.count = n
+    if n < 6: return []
+    dist = lambda i, k: float(np.abs(fr[i] - fr[k]).mean())
+    d1 = [0.0] + [dist(i, i - 1) for i in range(1, n)]
+    out = []
+    for j in range(2, n - 2):
+        a, b = d1[j], d1[j + 1]  # saut en entrant dans l'image j, et en sortant
+        around = sorted(d1[k] for k in range(max(1, j - 10), min(n, j + 12)) if k < j - 1 or k > j + 2)
+        base = around[len(around) // 2] if around else 0.0
+        T = max(5.0, 4 * base + 3)
+        if a < T or b < T: continue
+        if d1[j - 1] > 0.35 * min(a, b) or d1[j + 2] > 0.35 * min(a, b): continue  # pas isolee : mouvement normal
+        out.append((j, j - 1 if dist(j, j - 1) < dist(j, j + 1) else j + 1))
+    return out
+
+
+def fix_orphans(path, fps, j=None):
+    """Remplace chaque image orpheline par sa voisine la plus proche (duree et son intacts)."""
+    orph = find_orphans(path, fps); nf = find_orphans.count
+    if not orph: return 0
+    if j is not None: j["message"] = f"Nettoyage des raccords ({len(orph)} image{'s' if len(orph) > 1 else ''})…"
+    n = len(orph); fc = [f"[0:v]split={n + 1}[m0]" + "".join(f"[r{i}]" for i in range(n))]
+    for i, (f, rpl) in enumerate(orph):
+        fc.append(f"[m{i}][r{i}]freezeframes=first={f}:last={f}:replace={rpl}[m{i + 1}]")
+    tmp = path + ".net.mkv"
+    with_encoder(lambda: stream_progress([CFG["ffmpeg"], "-y", "-v", "error", "-i", path, "-filter_complex", ";".join(fc),
+                                          "-map", f"[m{n}]", "-map", "0:a?", "-frames:v", str(nf)] + venc("final", fps) + ["-c:a", "copy", tmp],
+                                         j or {}, 93, 94, 1))
+    os.replace(tmp, path)
+    return n
+
+
 def crop_vf(p, st, sg, f0, f1, fps):
     """crop + scale d'un plan du rendu (images f0..f1 du short) : fenetre 9:16 (zoom compris) qui suit
     le cadrage clip par clip, change a l'image pres. Formule a plat (somme d'ecarts) : pas de limite."""
@@ -1198,6 +1246,11 @@ def do_render(j):
     with_encoder(lambda: stream_progress(
         [CFG["ffmpeg"], "-y", "-v", "error"] + inputs + gopt + ["-map", "[vout]", "-map", "[aout]"] + venc("final", fps)
         + ["-c:a", "pcm_s16le", "-t", f"{total:.3f}", "mix.mkv"], j, 5, 93, total, cwd=work))
+    if st.get("clean_joins", True):  # derniere verification sur la video finie : aucune image orpheline aux raccords
+        try:
+            j["fixed_frames"] = fix_orphans(tmp, fps, j)
+        except Exception:
+            pass
     # normalisation du son en deux passes : mesure, puis correction lineaire a -14 LUFS (standard des reseaux)
     j["message"] = "Réglage du volume final (-14 LUFS)…"; j["progress"] = 94
     target = "I=-14:TP=-1.5:LRA=11"

@@ -546,6 +546,8 @@ main{min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16
               <label class="check"><input type="checkbox" id="deghost"> Supprimer les images fantômes</label>
               <label class="check" style="margin-top:6px"><input type="checkbox" id="snapcuts"> Caler le cadrage sur les coupes de caméra</label>
               <p style="margin-top:6px">Un changement de cadrage tout près d'une coupe tombe exactement sur la coupe : jamais une image avec le mauvais cadre au raccord.</p>
+              <label class="check" style="margin-top:6px"><input type="checkbox" id="cleanjoins"> Nettoyage final des raccords</label>
+              <p style="margin-top:6px">Après chaque rendu, la vidéo finie est relue : une image isolée qui ne ressemble ni à celle d'avant ni à celle d'après (mauvais cadre, image d'un autre plan) est remplacée par sa voisine.</p>
             </div>
             <div class="f">
               <h3>Flash d'ouverture</h3>
@@ -1055,7 +1057,7 @@ function watchJob(j){
 }
 async function onJobDone(cur){
   if (cur.status === "erreur") toast("Échec : voir le message en haut");
-  else toast({render: `V${cur.version} générée`, light: `Version légère de V${cur.version} prête`, transcribe: "Transcription terminée",
+  else toast({render: `V${cur.version} générée` + (cur.fixed_frames ? ` · ${cur.fixed_frames} image${cur.fixed_frames > 1 ? "s" : ""} corrigée${cur.fixed_frames > 1 ? "s" : ""} aux raccords` : ""), light: `Version légère de V${cur.version} prête`, transcribe: "Transcription terminée",
     moments: /clé API/.test(cur.message || "") ? "Transcription prête : demande les moments à Claude" : "Moments trouvés, les shorts se fabriquent",
     clip: "Short prêt", publish: "Texte de publication prêt"}[cur.kind] || "Terminé");
   await loadProjects();
@@ -1737,7 +1739,7 @@ const BIND = [
   ["#hookshadowcol", "hook_shadow_color", "text"], ["#hookbox", "hook_box", "bool"], ["#hookboxcol", "hook_box_color", "text"],
   ["#flash", "flash", "bool"], ["#flashsfx", "flash_sfx", "bool"], ["#flashdur", "flash_dur", "num"], ["#flashdb", "flash_db", "num"], ["#flashcol", "flash_color", "text"],
   ["#mdb", "music_db", "num"], ["#ssize", "sub_size", "num"], ["#sy", "sub_y", "num"], ["#swords", "sub_words", "num"],
-  ["#pamt", "punch_amount", "num"], ["#facey", "face_y", "num"], ["#deghost", "deghost", "bool"], ["#snapcuts", "snap_cuts", "bool"],
+  ["#pamt", "punch_amount", "num"], ["#facey", "face_y", "num"], ["#deghost", "deghost", "bool"], ["#snapcuts", "snap_cuts", "bool"], ["#cleanjoins", "clean_joins", "bool"],
   ["#cutsil", "cut_silences", "bool"], ["#cutfill", "cut_fillers", "bool"], ["#silgap", "silence_gap", "num"],
   ["#sstyle", "sub_style", "text"], ["#shl", "sub_hl", "text"], ["#snopunct", "sub_nopunct", "bool"], ["#spop", "sub_pop", "bool"]];
 const OUTS = {flashdur: v => (+v).toFixed(2) + " s", flashdb: v => v + " dB", hookinms: v => v + " ms", hookoutms: v => v + " ms", hooksize: v => v + " px",
