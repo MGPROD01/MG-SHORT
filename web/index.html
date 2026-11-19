@@ -159,6 +159,8 @@ main{min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16
 .phone{position:relative;height:100%;aspect-ratio:9/16;max-width:420px;background:#000;border-radius:16px;overflow:hidden;border:1px solid var(--line-2)}
 .vbox{position:absolute;inset:0;overflow:hidden;cursor:pointer}
 .phone video{width:100%;height:100%;object-fit:cover;display:block;background:#000;transform-origin:0 0;will-change:transform}
+.oldcut{margin:8px 0 0;padding:9px 12px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.08);border-radius:10px;font-size:12.5px;color:#FDE68A;display:flex;gap:10px;align-items:center;justify-content:space-between}
+.oldcut.hidden{display:none}
 .vbox.reframe{cursor:grab}.vbox.reframing{cursor:grabbing}
 .vbox .fhint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:rgba(9,9,11,.82);color:#fff;font:600 11px/1 var(--ui);padding:6px 9px;border-radius:7px;pointer-events:none;white-space:nowrap;z-index:3}
 .stage-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;font-size:12px;color:var(--muted)}
@@ -426,6 +428,7 @@ main{min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16
           <div class="szwrap" id="szwrap"></div>
           <div class="empty-video hidden" id="novid">Vidéo indisponible</div>
         </div></div>
+        <div class="oldcut hidden" id="oldcut">Ce short a été découpé avec une ancienne version : son cadrage est figé dans la vidéo (images mal cadrées aux coupes possibles). <button class="btn sm primary" id="oldcutgo">Relancer la découpe</button></div>
         <div class="stage-foot">
           <select class="input" id="szsel" aria-label="Zone de sécurité"></select>
           <button class="btn sm hidden" id="frameauto" title="Revenir au cadrage automatique (qui parle) pour ce clip">Cadrage auto</button>
@@ -541,6 +544,8 @@ main{min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16
               <h3>Images fantômes</h3>
               <p>Retire l'image en trop aux coupes (mélange de deux plans ou image d'un autre plan) et la remplace par l'image d'avant. La durée et le son ne bougent pas.</p>
               <label class="check"><input type="checkbox" id="deghost"> Supprimer les images fantômes</label>
+              <label class="check" style="margin-top:6px"><input type="checkbox" id="snapcuts"> Caler le cadrage sur les coupes de caméra</label>
+              <p style="margin-top:6px">Un changement de cadrage tout près d'une coupe tombe exactement sur la coupe : jamais une image avec le mauvais cadre au raccord.</p>
             </div>
             <div class="f">
               <h3>Flash d'ouverture</h3>
@@ -1084,6 +1089,7 @@ let PLAN = null, CH = [];
 function showShort(fresh){
   const p = S.p;
   $("#ep").classList.add("hidden"); $("#epvid").pause(); $("#proj").classList.remove("hidden");
+  $("#oldcut").classList.toggle("hidden", !(p.parent && !p.wide && p.status === "prêt"));
   if (fresh) {
     S.sel = -1; $("#edit").classList.add("hidden"); ptl.clearMarks();
     S.view = p.versions.length ? p.versions[p.versions.length - 1].n : "source";
@@ -1201,6 +1207,14 @@ function showFrameAuto(){
   $("#frameauto").classList.toggle("hidden", !has);
   $("#vbox").classList.toggle("reframe", canReframe());
 }
+$("#oldcutgo").onclick = async () => {
+  const b = $("#oldcutgo"); b.disabled = true;
+  try {
+    watchJob(await api(`/api/projects/${enc(S.p.id)}/transcribe`, {}));
+    toast("Découpe relancée : tes corrections de texte et tes coupes sont gardées"); $("#oldcut").classList.add("hidden");
+  } catch (e) { toast(e.message); }
+  b.disabled = false;
+};
 $("#frameauto").onclick = () => {
   const c = clipAtNow(); if (!c) return;
   pushUndo(); setClipFrame(c, null, null); queueSave({reframe: S.p.reframe}); applyFrame(V.currentTime); showFrameAuto();
@@ -1723,7 +1737,7 @@ const BIND = [
   ["#hookshadowcol", "hook_shadow_color", "text"], ["#hookbox", "hook_box", "bool"], ["#hookboxcol", "hook_box_color", "text"],
   ["#flash", "flash", "bool"], ["#flashsfx", "flash_sfx", "bool"], ["#flashdur", "flash_dur", "num"], ["#flashdb", "flash_db", "num"], ["#flashcol", "flash_color", "text"],
   ["#mdb", "music_db", "num"], ["#ssize", "sub_size", "num"], ["#sy", "sub_y", "num"], ["#swords", "sub_words", "num"],
-  ["#pamt", "punch_amount", "num"], ["#facey", "face_y", "num"], ["#deghost", "deghost", "bool"],
+  ["#pamt", "punch_amount", "num"], ["#facey", "face_y", "num"], ["#deghost", "deghost", "bool"], ["#snapcuts", "snap_cuts", "bool"],
   ["#cutsil", "cut_silences", "bool"], ["#cutfill", "cut_fillers", "bool"], ["#silgap", "silence_gap", "num"],
   ["#sstyle", "sub_style", "text"], ["#shl", "sub_hl", "text"], ["#snopunct", "sub_nopunct", "bool"], ["#spop", "sub_pop", "bool"]];
 const OUTS = {flashdur: v => (+v).toFixed(2) + " s", flashdb: v => v + " dB", hookinms: v => v + " ms", hookoutms: v => v + " ms", hooksize: v => v + " px",
@@ -1811,6 +1825,9 @@ async function flushSave(){
   if (!pd) return;
   try {
     const r = await api(`/api/projects/${enc(pd.pid)}/save`, pd.body);
+    if (r && S.p && S.p.id === pd.pid && r.frames && JSON.stringify(r.frames) !== JSON.stringify(S.p.frames || [])) {
+      S.p.frames = r.frames; if (r.reframe) S.p.reframe = r.reframe; refreshShortTimeline();  // cadrage recalé sur les coupes
+    }
     // les blancs dépendent des mots et des réglages : le serveur renvoie la nouvelle liste
     if (r && r.auto_cuts && S.p && S.p.id === pd.pid && JSON.stringify(r.auto_cuts) !== JSON.stringify(S.p.auto_cuts || [])) {
       S.p.auto_cuts = r.auto_cuts; S.keep = keepRanges(S.p); CUTS = allCuts(S.p); PLAN = null;

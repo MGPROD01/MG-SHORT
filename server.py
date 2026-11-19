@@ -177,7 +177,7 @@ DEFAULT_SETTINGS = {
     "music": "", "music_db": -26, "music_offset": 0,
     "sub_size": 108, "sub_y": 0.67, "sub_words": 3, "sub_chars": 14, "sub_case": "upper",
     "punch_amount": 1.3, "punch_len": 1.2, "face_y": 0.30, "deghost": True,
-    "cut_silences": True, "silence_gap": 0.5, "cut_fillers": True,
+    "cut_silences": True, "silence_gap": 0.5, "cut_fillers": True, "snap_cuts": True,
     "sub_style": "karaoke", "sub_hl": "#FFE100", "sub_nopunct": True, "sub_pop": False,
 }
 
@@ -974,6 +974,76 @@ def frame_at(p, t, st=None):
     return x, y
 
 
+def cut_frames(p):
+    """Coupes de camera dans la video du short (numeros d'image), reperees image par image. En cache."""
+    src = os.path.join(pdir(p["id"]), p["source"]); fps = p.get("fps") or 25
+    cache = os.path.join(pdir(p["id"]), "coupes.json")
+    key = f"{os.path.getsize(src)}:{int(os.path.getmtime(src))}"
+    try:
+        c = json.load(open(cache))
+        if c.get("key") == key: return c["frames"]
+    except Exception:
+        pass
+    try:
+        import numpy as np
+    except ImportError:
+        return []
+    ww, hh = 96, 54
+    pr = subprocess.Popen([CFG["ffmpeg"], "-v", "error", "-i", src, "-an", "-vf", f"fps={fps},scale={ww}:{hh}:flags=area,format=gray",
+                           "-fps_mode", "passthrough", "-f", "rawvideo", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=NOWIN)
+    fr = []
+    while True:
+        buf = pr.stdout.read(ww * hh)
+        if len(buf) < ww * hh: break
+        fr.append(np.frombuffer(buf, np.uint8).astype(np.float32))
+    pr.wait()
+    n = len(fr); d1 = [0.0] + [float(np.abs(fr[i] - fr[i - 1]).mean()) for i in range(1, n)]
+    out = []
+    for j in range(1, n):
+        around = sorted(d1[k] for k in range(max(1, j - 10), min(n, j + 11)) if abs(k - j) > 1)
+        base = around[len(around) // 2] if around else 0.0
+        nb = max(d1[j - 1] if j > 1 else 0.0, d1[j + 1] if j + 1 < n else 0.0)
+        if d1[j] >= 3 and d1[j] > 2.5 * base + 2 and d1[j] > 1.6 * nb: out.append(j)
+        # coupe etalee sur 2 images (fondu d'une image) : on prend la 2e
+        elif j + 1 < n and d1[j] >= 2 and d1[j + 1] >= 2 and float(np.abs(fr[j + 1] - fr[j - 1]).mean()) > max(4, 3 * base + 2) \
+                and d1[j - 1] < 0.4 * d1[j] and (j + 2 >= n or d1[j + 2] < 0.4 * d1[j + 1]):
+            out.append(j + 1)
+    out = sorted(set(out))
+    try: json.dump({"key": key, "frames": out}, open(cache, "w"))
+    except OSError: pass
+    return out
+
+
+def snap_to_cuts(p):
+    """Option « Caler le cadrage sur les coupes » : tout changement de cadrage (automatique ou fait a la main)
+    a moins de 8 images d'une coupe de camera tombe exactement sur la coupe. Plus d'image mal cadree au raccord."""
+    if not p.get("wide") or not p.get("frames"): return p
+    raw = p.get("frames_raw") or p["frames"]; p["frames_raw"] = raw
+    rraw = p.get("reframe_raw") if p.get("reframe_raw") is not None else None
+    if not (p.get("settings") or {}).get("snap_cuts", True):
+        p["frames"] = [list(f) for f in raw]; return p
+    fps = p.get("fps") or 25
+    try:
+        cuts = cut_frames(p)
+    except Exception:
+        cuts = []
+    import bisect
+    def snap(t):
+        f = round(t * fps)
+        if not cuts or f <= 0: return t
+        k = bisect.bisect_left(cuts, f); near = [c for c in cuts[max(0, k - 1):k + 1] if abs(c - f) <= 8]
+        return round(min(near, key=lambda c: abs(c - f)) / fps, 6) if near else t
+    fr = []
+    for f in raw:
+        t = 0.0 if f[0] <= 0 else snap(f[0])
+        if fr and abs(fr[-1][0] - t) < 1e-6: fr[-1] = [t, f[1], f[2]]
+        else: fr.append([t, f[1], f[2]])
+    p["frames"] = fr
+    src = rraw if rraw is not None else p.get("reframe") or []
+    p["reframe"] = [dict(r, a=snap(r["a"]) if r["a"] > 0 else 0.0, b=snap(r["b"]) if r["b"] < p["duration"] - 1e-3 else r["b"]) for r in src]
+    return p
+
+
 def crop_vf(p, st, sg, f0, f1, fps):
     """crop + scale d'un plan du rendu (images f0..f1 du short) : fenetre 9:16 (zoom compris) qui suit
     le cadrage clip par clip, change a l'image pres. Formule a plat (somme d'ecarts) : pas de limite."""
@@ -1034,6 +1104,9 @@ def do_render(j):
     sont enleves a l'image pres (select / aselect), puis concat, sous-titres, flash, musique, bruitages."""
     p = load_project(j["project"]); d = pdir(p["id"])
     st = dict(p["settings"]); st.update(j.get("settings") or {})
+    if p.get("wide") and p.get("frames"):
+        with LOCK:
+            p = snap_to_cuts(load_project(p["id"])); save_project(p)
     n = max([v["n"] for v in p.get("versions", [])] + [0]) + 1
     vdir = os.path.join(d, "versions"); os.makedirs(vdir, exist_ok=True)
     work = os.path.join(d, "_rendu"); shutil.rmtree(work, ignore_errors=True); os.makedirs(work)
@@ -1678,6 +1751,11 @@ def do_clip(j):
         pass
     p = load_project(p["id"]); p["status"] = "prêt"
     pr_ = probe(out); p["width"], p["height"] = pr_["width"], pr_["height"]
+    p.pop("frames_raw", None)
+    try:
+        j["message"] = "Calage du cadrage sur les coupes…"; snap_to_cuts(p)
+    except Exception:
+        pass
     try:  # les mots viennent de la video longue : on les recale sur le son du short
         j["message"] = "Calage des sous-titres sur la voix…"; realign(p)
     except Exception:
@@ -2031,11 +2109,15 @@ class H_(BaseHTTPRequestHandler):
                                        "x": None if r.get("x") is None else round(min(1, max(0, float(r["x"]))), 4),
                                        "y": None if r.get("y") is None else round(min(1, max(0, float(r["y"]))), 4)})
                         p["reframe"] = rf
+                    if "reframe" in body: p.pop("reframe_raw", None)
+                    if p.get("wide") and ("reframe" in body or "snap_cuts" in (body.get("settings") or {})):
+                        snap_to_cuts(p)
                     if "splits" in body:  # coupures posees avec l'outil Couper (temps de la source)
                         p["splits"] = sorted({round(float(x), 3) for x in body["splits"] if 0 < float(x) < p["duration"]})
                     if "name" in body and body["name"].strip(): p["name"] = body["name"].strip()
                     save_project(p)
-                    return self.send_json({"ok": True, "cuts": p.get("cuts", []), "auto_cuts": silence_cuts(p)})
+                    return self.send_json({"ok": True, "cuts": p.get("cuts", []), "auto_cuts": silence_cuts(p),
+                                           "frames": p.get("frames"), "reframe": p.get("reframe")})
                 if act == "realign":
                     if busy(pid): return self.send_json({"error": "Un traitement est en cours sur ce projet."}, 409)
                     p = realign(p); save_project(p)

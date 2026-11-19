@@ -76,6 +76,9 @@ SHORT DEJA MONTE
   - Images fantomes (Habillage, coche par defaut) : retire l'image en trop
     aux coupes (melange de deux plans, ou image isolee d'un autre plan) et la
     remplace par l'image d'avant. Duree et son inchanges.
+  - Caler le cadrage sur les coupes (Habillage, coche par defaut) : tout
+    changement de cadrage a moins de 8 images d'une coupe de camera tombe
+    exactement sur la coupe. Plus d'image mal cadree au raccord.
   - Blancs (Habillage, coche par defaut) : les pauses plus longues que le
     reglage (0,5 s) et les "euh" sont coupes tout seuls. Ils apparaissent
     hachures en jaune sur la timeline. Decocher pour tout garder.
